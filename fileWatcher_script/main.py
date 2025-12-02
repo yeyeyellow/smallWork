@@ -6,18 +6,26 @@ import shutil
 import time
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-
+import yaml
+import argparse
 
 SCIPT_NAME = 'main.py'
-FILE_CATEGORIES = {
-    "图片": [".jpg", ".jpeg", ".png", ".gif", ".webp"],
-    "文档": [".pdf", ".docx", ".doc", ".txt", ".xlsx",'.xls'],
-    "安装包": [".exe", ".msi", ".dmg", ".pkg"],
-    "压缩包": [".zip", ".rar", ".7z", ".tar"],
-    '视频':['.mp4']
-}
-
-def classify(i:Path)-> None:
+def load_categoreis_file():
+    '''
+    加载文件类别配置文件
+    '''
+    try:
+        with open('./config.yaml','r',encoding='utf-8') as f:
+            FILE_CATEGORIES = yaml.safe_load(f)
+            print('加载成功')
+            return FILE_CATEGORIES
+    except FileNotFoundError:
+        print('找不到文件')
+        return {}
+    except yaml.YAMLError:
+        print('yaml格式错误')
+        return {}
+def classify(i:Path,FILE_CATEGORIES)-> None:
     """
     按照后缀名分类文件
     """
@@ -25,7 +33,7 @@ def classify(i:Path)-> None:
         return
     if i.is_file():
         for k,v in FILE_CATEGORIES.items():
-            if i.suffix in v:
+            if i.suffix.lower() in v:
                 categories_path = Path(i.parent/k)
                 categories_path.mkdir(parents=True,exist_ok=True)
                 target = Path(categories_path/i.name)
@@ -41,26 +49,32 @@ def classify(i:Path)-> None:
                         else:
                             break
                     shutil.move(i,new_target)
+                    print(f'moved {i.name} to {categories_path.name}')
                 else:
                     shutil.move(i,target)
+                    print(f'moved {i.name} to {categories_path.name}')
+
 
 class MyHandler(FileSystemEventHandler):
     """
     文件监听的回调
     """
+    def __init__(self,FILE_CATEGORIES):
+        super().__init__()
+        self.FILE_CATEGORIES = FILE_CATEGORIES
     def on_created(self, event):
         event_path=Path(event.src_path)
         i=0
         while i<9:
             try:
-                classify(event_path)
+                classify(event_path,self.FILE_CATEGORIES)
                 break
             except PermissionError:
                 time.sleep(1)
                 i+=1
     def on_moved(self, event):
         event_path = Path(event.dest_path)
-        classify(event_path)
+        classify(event_path,self.FILE_CATEGORIES)
 
 def main(watching_path,watching_path_str):
     """
@@ -68,12 +82,14 @@ def main(watching_path,watching_path_str):
 
     args:watching_path(Path) 接受Path类型的对象,watching_path_str(str)
     """
+    FILE_CATEGORIES = load_categoreis_file()
     for entry in watching_path.iterdir():
-        classify(entry)
-    my_handler = MyHandler()
+        classify(entry,FILE_CATEGORIES)
+    my_handler = MyHandler(FILE_CATEGORIES)
     observer = Observer()
     observer.schedule(my_handler,watching_path_str,recursive=False,)
     observer.start()
+    print('开始监听')
     try:
         while True:
             time.sleep(1)
@@ -86,7 +102,9 @@ def main(watching_path,watching_path_str):
     observer.join()
 
 if __name__ == '__main__':
-    path_str =(input('请输入想要监听哪个文件夹:')).strip('"')
-    print(f'开始监听文件夹:{path_str}')
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--path',help='请输入你想要监听的文件夹路径',required=True)
+    args=parser.parse_args()
+    path_str=args.path.strip('"')
     path=Path(path_str)
     main(path,path_str)
